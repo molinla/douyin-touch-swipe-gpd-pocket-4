@@ -192,8 +192,10 @@ const marker = 'data-douyin-touch-controls-idle';
     }
     const waitForIdleControls = () => page.waitForFunction(([selector, attribute]) =>
       document.querySelector(`${selector} .xgplayer`)?.hasAttribute(attribute), [active, marker], { timeout: 4800 });
-    const readLayout = () => player.evaluate(el => {
+    const readLayout = () => player.evaluate(async el => {
       const video = el.querySelector('video');
+      const transitions = video.parentElement.getAnimations().filter(animation => animation.transitionProperty === 'bottom');
+      await Promise.allSettled(transitions.map(animation => animation.finished));
       const bounds = node => {
         const { x, y, width, height } = node.getBoundingClientRect();
         return [x, y, width, height].map(Math.round);

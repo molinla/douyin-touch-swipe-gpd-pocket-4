@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音触屏优化GPD Pocket 4专版
 // @namespace    local.douyin-touch-swipe
-// @version      1.4.5
+// @version      1.4.6
 // @homepageURL  https://github.com/molinla/douyin-touch-swipe-gpd-pocket-4
 // @supportURL   https://github.com/molinla/douyin-touch-swipe-gpd-pocket-4/issues
 // @description  为 GPD Pocket 4 优化抖音网页版推荐页。触屏切换视频和直播、开关评论、长按倍速、拖动进度、进入时自动解除静音，全屏空闲时自动隐藏控件。
@@ -34,6 +34,7 @@
   const DRAG_START = 8;
   const VERTICAL_SWIPE_PX = 48;
   const CONTROLS_IDLE_MS = 3000;
+  const FULLSCREEN_PLAYER = 'data-douyin-touch-fullscreen';
   const HIDE_CONTROLS = 'data-douyin-touch-controls-idle';
   const PROGRESS = 'xg-progress, .xgplayer-progress';
   const PLAYER_CONTROLS = `xg-controls, .xgplayer-controls, xg-inner-controls, xg-outer-controls,
@@ -138,6 +139,7 @@
 
     const style = document.createElement('style');
     const idlePlayer = `#slidelist .xgplayer[${HIDE_CONTROLS}]`;
+    const videoContainer = ':is(xg-video-container, .xg-video-container)';
     const idleControls = `${idlePlayer} :is(${PLAYER_CONTROLS}),
       #slidelist .basePlayerContainer:has([${HIDE_CONTROLS}]) :is(${FEED_OVERLAYS})`;
     style.textContent = `
@@ -164,10 +166,14 @@
         visibility: hidden !important;
         pointer-events: none !important;
       }
-      /* 全屏隐藏底栏后，释放播放器为控制区预留的底部空间。 */
-      ${idlePlayer} :is(xg-video-container, .xg-video-container) {
+      @media (prefers-reduced-motion: no-preference) {
+        #slidelist .xgplayer[${FULLSCREEN_PLAYER}] ${videoContainer} {
+          transition: bottom 220ms ease-in-out !important;
+        }
+      }
+      /* 调整底部留距，让视频尺寸随过渡等比变化。 */
+      ${idlePlayer} ${videoContainer} {
         bottom: 0 !important;
-        height: 100% !important;
       }
       ${idlePlayer} video {
         object-fit: contain !important;
@@ -358,8 +364,10 @@
       if (player === next) return;
       clearTimeout(timer);
       timer = 0;
+      player?.removeAttribute(FULLSCREEN_PLAYER);
       player?.removeAttribute(HIDE_CONTROLS);
       player = next;
+      player?.setAttribute(FULLSCREEN_PLAYER, '');
       heldPointers.clear();
       reveal();
     }
