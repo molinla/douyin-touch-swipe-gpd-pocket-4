@@ -5,7 +5,7 @@
 ## 安装
 
 1. 在浏览器里启用 [Tampermonkey（油猴）](https://www.tampermonkey.net/)。
-2. 打开[安装脚本](https://raw.githubusercontent.com/molinla/douyin-touch-swipe-gpd-pocket-4/main/douyin-touch-swipe.user.js)，在油猴的确认页点击「安装」。
+2. 从 [Greasy Fork](https://greasyfork.org/zh-CN/scripts/606703) 或 [GitHub](https://raw.githubusercontent.com/molinla/douyin-touch-swipe-gpd-pocket-4/main/douyin-touch-swipe.user.js) 打开脚本，在油猴的确认页点击「安装」。
 3. 打开[抖音推荐页](https://www.douyin.com/?recommend=1&from_nav=1)。如果进入了「精选」，点左侧的「推荐」。
 
 从测试版迁移时，请先停用油猴中原来的「抖音推荐 · 触屏上下滑切视频」，再启用本发布版。
@@ -28,3 +28,7 @@
 面向 Windows 触屏设备上的抖音网页版和 Tampermonkey，已在 Chrome 的实际推荐页用 Playwright 模拟触屏测试。脚本声明 `@grant none`，由浏览器本地处理手势。
 
 遇到问题时，可以在 [GitHub Issues](https://github.com/molinla/douyin-touch-swipe-gpd-pocket-4/issues) 附上浏览器版本、设备、触发手势和复现步骤。
+
+## 开发与版本归档
+
+仓库根目录的 `douyin-touch-swipe.user.js` 是编辑入口和 Greasy Fork 的同步源。[release/v1.4.2](release/v1.4.2/) 保存了 v1.4.2 的发布快照。[开发工具说明](tooling/README.md) 包含 Playwright 测试、页面检查和触控诊断的用法。

@@ -1,0 +1,19 @@
+{
+  "name": "douyin-touch-swipe-gpd-pocket-4",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test:touch": "node tooling/test-touch.cjs",
+    "test:live": "node tooling/test-live.cjs",
+    "test:comments": "node tooling/test-comments.cjs",
+    "test:sidebar": "node tooling/test-sidebar.cjs",
+    "test:fullscreen": "node tooling/test-fullscreen.cjs",
+    "diag:build": "node tooling/build-douyin-diagnostics.cjs",
+    "diag:serve": "node tooling/douyin-diagnostics-server.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}
