@@ -1,14 +1,14 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { chromium } = require('playwright');
-const { artifacts, browserProfile, userscript } = require('./paths.cjs');
+const { artifacts, browserProfile, loadTestScript } = require('./paths.cjs');
 
 (async () => {
   const context = await chromium.launchPersistentContext(browserProfile, {
     channel: 'chrome', headless: false, hasTouch: true, viewport: { width: 1280, height: 800 },
   });
   try {
-    await context.addInitScript({ path: userscript });
+    await context.addInitScript({ content: loadTestScript() });
     const page = context.pages()[0];
     const url = 'https://www.douyin.com/jingxuan';
     const toggle = page.locator('#douyin-touch-sidebar-toggle');

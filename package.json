@@ -5,6 +5,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "test:guide": "node tooling/test-guide.cjs",
     "test:audio": "node tooling/test-audio.cjs",
     "test:touch": "node tooling/test-touch.cjs",
     "test:live": "node tooling/test-live.cjs",

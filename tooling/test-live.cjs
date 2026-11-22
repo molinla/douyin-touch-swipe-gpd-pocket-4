@@ -1,13 +1,13 @@
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
-const { browserProfile, userscript } = require('./paths.cjs');
+const { browserProfile, loadTestScript } = require('./paths.cjs');
 
 (async () => {
   const context = await chromium.launchPersistentContext(browserProfile, {
     channel: 'chrome', headless: false, hasTouch: true, viewport: { width: 1280, height: 800 },
   });
   try {
-    await context.addInitScript({ path: userscript });
+    await context.addInitScript({ content: loadTestScript() });
     const page = context.pages()[0];
     await page.goto('https://www.douyin.com/jingxuan', { waitUntil: 'domcontentloaded', timeout: 30000 });
     const nav = page.locator('a[href*="recommend=1"]').filter({ hasText: '推荐' }).first();

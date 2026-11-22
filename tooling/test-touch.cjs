@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { chromium } = require('playwright');
-const { browserProfile, debugUserscript, diagnosticConfig, userscript } = require('./paths.cjs');
+const { browserProfile, debugUserscript, diagnosticConfig, userscript, loadTestScript } = require('./paths.cjs');
 
 const active = '[data-e2e="feed-active-video"]';
 const script = process.env.DOUYIN_TEST_SCRIPT || (process.env.DOUYIN_DIAGNOSTICS_SELF_TEST ? debugUserscript : userscript);
@@ -31,9 +31,9 @@ const script = process.env.DOUYIN_TEST_SCRIPT || (process.env.DOUYIN_DIAGNOSTICS
           const y = new DOMMatrixReadOnly(getComputedStyle(track).transform).m42;
           track.style.transform = 'translate3d(0px, ' + (y - 46) + 'px, 0px)';
         }, {capture:true, passive:true});` : '';
-      await context.addInitScript({ content: shim + nativeNudge + '\n' + fs.readFileSync(script, 'utf8') });
+      await context.addInitScript({ content: shim + nativeNudge + '\n' + loadTestScript(script) });
     } else {
-      await context.addInitScript({ path: script });
+      await context.addInitScript({ content: loadTestScript(script) });
     }
     const page = context.pages()[0];
     await page.goto('https://www.douyin.com/jingxuan', { waitUntil: 'domcontentloaded', timeout: 45000 });

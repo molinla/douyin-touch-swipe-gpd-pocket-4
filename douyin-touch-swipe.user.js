@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         抖音触屏优化GPD Pocket 4专版
 // @namespace    local.douyin-touch-swipe
-// @version      1.4.6
+// @version      1.4.7
 // @homepageURL  https://github.com/molinla/douyin-touch-swipe-gpd-pocket-4
 // @supportURL   https://github.com/molinla/douyin-touch-swipe-gpd-pocket-4/issues
-// @description  为 GPD Pocket 4 优化抖音网页版推荐页。触屏切换视频和直播、开关评论、长按倍速、拖动进度、进入时自动解除静音，全屏空闲时自动隐藏控件。
+// @description  为 GPD Pocket 4 优化抖音网页版推荐页。首次触控引导，滑动切换视频或开关评论，长按倍速、拖动进度、自动开声和全屏自动隐藏底栏。
 // @match        https://www.douyin.com/*
 // @run-at       document-start
 // @grant        none
@@ -749,7 +749,10 @@
       && (scrub.moved || (scrub.seekOnTap && !scrub.preview)
         || Math.abs(event.clientX - scrub.startX) >= SEEK_DRAG_START);
     cancelScrub();
-    if (shouldSeek) seekAt(scrub, event.clientX);
+    if (shouldSeek) {
+      seekAt(scrub, event.clientX);
+      if (scrub.moved) touchGuide?.seeked();
+    }
   }
 
   function isSeekTouch(event, end = false) {
@@ -771,6 +774,280 @@
   window.addEventListener('pagehide', cancelScrub);
   // 先判断落点是否命中已显示的进度条，再处理唤醒自动隐藏的控制区。
   installFullscreenControls();
+
+  function installTouchGuide() {
+    const storageKey = 'douyin-touch-guide-v1';
+    if (!navigator.maxTouchPoints) return;
+    try {
+      if (localStorage.getItem(storageKey)) return;
+    } catch {}
+
+    const overlay = document.createElement('div');
+    overlay.id = 'douyin-touch-guide';
+    overlay.hidden = true;
+    overlay.innerHTML = `
+      <div class="dt-guide-spot" aria-hidden="true"></div>
+      <section class="dt-guide-card" aria-labelledby="dt-guide-title">
+        <div class="dt-guide-progress"></div>
+        <div aria-live="polite" aria-atomic="true">
+          <h2 id="dt-guide-title"></h2>
+          <p class="dt-guide-copy"></p>
+        </div>
+        <div class="dt-guide-actions">
+          <button type="button" data-guide="skip">跳过</button>
+          <button type="button" data-guide="back">上一步</button>
+          <button type="button" data-guide="next">下一步</button>
+        </div>
+      </section>`;
+    const style = document.createElement('style');
+    style.textContent = `
+      #douyin-touch-guide { position: fixed; inset: 0; z-index: 2147483646; pointer-events: none; overflow: hidden; }
+      #douyin-touch-guide [hidden] { display: none !important; }
+      #douyin-touch-guide[data-no-spot] { background: rgba(4, 5, 10, .56); }
+      .dt-guide-spot {
+        position: absolute; box-sizing: border-box; border: 2px dashed rgba(255, 255, 255, .94);
+        border-radius: 13px; box-shadow: 0 0 0 150vmax rgba(4, 5, 10, .64);
+      }
+      .dt-guide-card {
+        position: absolute; box-sizing: border-box; width: min(318px, calc(100% - 24px)); max-height: calc(100% - 24px);
+        overflow: auto; padding: 17px 18px 14px; pointer-events: auto; border: 1px solid rgba(255, 255, 255, .16);
+        border-radius: 16px; background: #22232c; color: #fff; box-shadow: 0 12px 40px rgba(0, 0, 0, .48);
+        font: 14px/1.55 system-ui, sans-serif;
+      }
+      .dt-guide-card h2 { margin: 5px 0 6px; color: inherit; font: 700 18px/1.35 system-ui, sans-serif; }
+      .dt-guide-progress, .dt-guide-copy { color: #dedfe7; }
+      .dt-guide-progress { font-size: 12px; }
+      .dt-guide-copy { margin: 0; }
+      .dt-guide-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-top: 12px; }
+      .dt-guide-actions button {
+        min-height: 40px; padding: 0 12px; border: 0; border-radius: 9px; touch-action: manipulation;
+        color: #fff; background: rgba(255, 255, 255, .09); font: 600 13px system-ui, sans-serif; cursor: pointer;
+      }
+      .dt-guide-actions button[data-guide="skip"] { margin-right: auto; background: transparent; color: #dedfe7; }
+      .dt-guide-actions button[data-guide="next"] { background: #d91d48; }
+      .dt-guide-actions button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    `;
+    const spot = overlay.querySelector('.dt-guide-spot');
+    const card = overlay.querySelector('.dt-guide-card');
+    const progressText = card.querySelector('.dt-guide-progress');
+    const title = card.querySelector('h2');
+    const copy = card.querySelector('p');
+    const back = card.querySelector('[data-guide="back"]');
+    const next = card.querySelector('[data-guide="next"]');
+    const controller = new AbortController();
+    const options = { passive: true, signal: controller.signal };
+    let pendingFrame = 0;
+    let step = 0;
+    let sawExpanded = false;
+    let sawComments = false;
+    let initialVideo = null;
+    let sawFullscreenControls = false;
+    let rendered = '';
+    let measuredPlayer = null;
+    let startDelay = 0;
+    let readyToStart = false;
+
+    const steps = [
+      { title: '展开与收起导航', detail: '点左上角虚线框里的按钮，展开导航。' },
+      { title: '左滑打开评论', detail: '在视频画面上向左滑，打开评论区。', },
+      { title: '右滑关闭评论', detail: '在评论列表或视频画面上向右滑，收起评论区。' },
+      { title: '上下滑切换视频', detail: '上滑看下一条，下滑回到上一条。普通视频两侧长按可临时开启 2 倍速。' },
+      { title: '拖动进度条', detail: '按住底部虚线框里的进度条左右拖动，松手跳到对应时间。向上滑可取消。' },
+      { title: '全屏自动隐藏底栏', detail: '点全屏按钮。全屏空闲 3 秒后，进度条、底部信息和右侧按钮会自动隐藏。轻触画面可再次显示。' },
+    ];
+
+    function rect(element, includeHidden = false) {
+      if (!element || (!includeHidden && getComputedStyle(element).visibility !== 'visible')) return null;
+      const bounds = element.getBoundingClientRect();
+      const left = Math.max(0, bounds.left);
+      const top = Math.max(0, bounds.top);
+      const width = Math.min(innerWidth, bounds.right) - left;
+      const height = Math.min(innerHeight, bounds.bottom) - top;
+      return width > 2 && height > 2 ? { left, top, width, height } : null;
+    }
+
+    function swipeArea(area) {
+      return area && { left: area.left + area.width * .12, top: area.top + area.height * .22,
+        width: area.width * .76, height: area.height * .48 };
+    }
+
+    function place(area) {
+      const width = card.offsetWidth;
+      const height = card.offsetHeight;
+      const clamp = (value, max) => Math.max(12, Math.min(max - 12, value));
+      let left = (innerWidth - width) / 2;
+      let top = innerHeight - height - 18;
+      if (area) {
+        const { left: x, top: y, width: w, height: h } = area;
+        const centerX = clamp(x + (w - width) / 2, innerWidth - width);
+        const centerY = clamp(y + (h - height) / 2, innerHeight - height);
+        const candidates = [[centerX, y + h + 12], [centerX, y - height - 12],
+          [x + w + 12, centerY], [x - width - 12, centerY]];
+        const unobstructed = candidates.find(([cx, cy]) => cx >= 12 && cy >= 12
+          && cx + width <= innerWidth - 12 && cy + height <= innerHeight - 12);
+        if (unobstructed) {
+          [left, top] = unobstructed;
+        } else {
+          left = centerX;
+          const putBelow = y + h / 2 < innerHeight / 2;
+          top = putBelow ? innerHeight - height - 12 : 12;
+          const start = putBelow ? y : Math.max(y, top + height + 8);
+          const end = putBelow ? Math.min(y + h, top - 8) : y + h;
+          area = end > start + 2 ? { ...area, top: start, height: end - start } : null;
+        }
+      }
+      spot.hidden = !area;
+      overlay.toggleAttribute('data-no-spot', !area);
+      if (area) Object.assign(spot.style, { left: area.left + 'px', top: area.top + 'px',
+        width: area.width + 'px', height: area.height + 'px' });
+      card.style.left = clamp(left, innerWidth - width) + 'px';
+      card.style.top = clamp(top, innerHeight - height) + 'px';
+    }
+
+    function stop() {
+      controller.abort();
+      observer.disconnect();
+      resizeObserver.disconnect();
+      cancelAnimationFrame(pendingFrame);
+      clearTimeout(startDelay);
+      overlay.remove();
+      style.remove();
+      try { localStorage.setItem(storageKey, 'seen'); } catch {}
+    }
+
+    function move(delta) {
+      if (step + delta >= steps.length) {
+        stop();
+        return;
+      }
+      step = Math.max(0, step + delta);
+      sawExpanded = sawComments = sawFullscreenControls = false;
+      initialVideo = null;
+      schedule();
+    }
+
+    function refresh() {
+      pendingFrame = 0;
+      const feed = document.getElementById('slidelist');
+      const sidebar = document.getElementById('douyin-touch-sidebar-toggle');
+      const siteGuide = document.querySelector('[data-e2e="recommend-guide-mask"]');
+      const login = document.querySelector('#douyin_login_landing_flat_container, .trust-login-dialog-button-cancel');
+      if (!isRecommendPage() || !feed || !sidebar || rect(siteGuide) || rect(login)) {
+        overlay.hidden = true;
+        return;
+      }
+      const active = feed.querySelector(ACTIVE_VIDEO);
+      const player = active?.querySelector('.xgplayer');
+      const video = player?.querySelector('video');
+      if (!readyToStart) {
+        const media = video || feed.querySelector(`${LIVE} video`);
+        if (!startDelay && media?.readyState >= 2) {
+          startDelay = setTimeout(() => { readyToStart = true; schedule(); }, 350);
+        }
+        return;
+      }
+      const measured = player || feed;
+      if (measured !== measuredPlayer) {
+        resizeObserver.disconnect();
+        resizeObserver.observe(measured);
+        measuredPlayer = measured;
+      }
+      const panel = active?.querySelector(COMMENT_PANEL);
+      const comments = Boolean(rect(panel) && panel.querySelector('#semiTabcomment[aria-selected="true"]'));
+      const fullscreen = isFeedFullscreen(feed);
+      const stage = swipeArea(rect(video) || rect(feed));
+      const rail = rect(player?.querySelector(PROGRESS), true);
+      let area;
+      let detail = steps[step].detail;
+      if (step === 0) {
+        area = fullscreen ? null : rect(sidebar);
+        const expanded = sidebar.getAttribute('aria-expanded') === 'true';
+        if (expanded) {
+          sawExpanded = true;
+          detail = '导航已展开。再点一次虚线框里的按钮收起。';
+        } else if (sawExpanded) return move(1);
+        if (fullscreen) detail = '退出全屏后，点左上角的按钮展开或收起导航。';
+      } else if (step === 1) {
+        if (comments) return move(1);
+        area = stage;
+        if (!active?.querySelector(COMMENT_BUTTON)) detail = '先滑到一条带评论按钮的视频，再在画面上向左滑。';
+      } else if (step === 2) {
+        if (comments) sawComments = true;
+        else if (sawComments) return move(1);
+        area = comments ? swipeArea(rect(panel.querySelector(COMMENT_LIST)) || rect(panel)) : stage;
+        if (!comments) detail = '先左滑打开评论，再在评论列表或视频画面上右滑关闭。';
+      } else if (step === 3) {
+        const key = active?.getAttribute('data-e2e-vid') || active
+          || [...feed.querySelectorAll(SLIDE)].find(el => {
+            const r = el.getBoundingClientRect();
+            return r.top <= innerHeight / 2 && r.bottom > innerHeight / 2;
+          });
+        if (key && initialVideo && key !== initialVideo) return move(1);
+        initialVideo = key || initialVideo;
+        area = stage;
+      } else if (step === 4) {
+        if (rail && Number.isFinite(video?.duration) && video.duration > 0) {
+          area = { ...rail, top: Math.max(0, rail.top - 7), height: rail.height + 14 };
+        } else {
+          area = stage;
+          detail = '先滑到一条可拖动进度的普通视频，再沿底部的进度条左右拖动。';
+        }
+      } else if (fullscreen && player) {
+        area = rail;
+        if (!player.hasAttribute(HIDE_CONTROLS)) {
+          sawFullscreenControls = true;
+          detail = '试着停 3 秒，底栏和右侧按钮会自动隐藏。之后轻触画面可再次显示。';
+        } else if (sawFullscreenControls) return stop();
+        else detail = '轻触画面唤醒底栏，再停 3 秒观察自动隐藏。';
+      } else {
+        area = [...player?.querySelectorAll('.xgplayer-fullscreen, .xgplayer-page-full-screen') || []]
+          .map(button => rect(button, true)).find(Boolean);
+        if (!area) detail = '先滑到普通视频再点全屏。全屏空闲 3 秒后，底栏和右侧按钮会自动隐藏。';
+      }
+
+      const host = document.fullscreenElement || document.body;
+      if (!host || !document.head) return;
+      if (!style.isConnected) document.head.append(style);
+      if (overlay.parentNode !== host) host.append(overlay);
+      overlay.hidden = false;
+      const content = step + ':' + detail;
+      if (rendered !== content) {
+        rendered = content;
+        progressText.textContent = '触控引导 ' + (step + 1) + ' / ' + steps.length;
+        title.textContent = steps[step].title;
+        copy.textContent = detail;
+        back.hidden = step === 0;
+        next.textContent = step === steps.length - 1 ? '完成' : '下一步';
+      }
+      place(area);
+    }
+
+    function schedule() {
+      if (!pendingFrame && !controller.signal.aborted) pendingFrame = requestAnimationFrame(refresh);
+    }
+
+    back.addEventListener('click', () => move(-1));
+    next.addEventListener('click', () => move(1));
+    card.querySelector('[data-guide="skip"]').addEventListener('click', stop);
+    const observer = new MutationObserver(records => {
+      if (records.some(record => !overlay.contains(record.target))) schedule();
+    });
+    const resizeObserver = new ResizeObserver(schedule);
+    observer.observe(document, { childList: true, subtree: true, attributes: true,
+      attributeFilter: ['hidden', 'aria-expanded', 'aria-selected', 'class', 'data-e2e', 'data-e2e-vid', HIDE_CONTROLS] });
+    window.addEventListener('resize', schedule, options);
+    for (const event of ['loadeddata', 'durationchange']) {
+      window.addEventListener(event, schedule, { ...options, capture: true });
+    }
+    window.addEventListener('scroll', schedule, { ...options, capture: true });
+    window.addEventListener('transitionend', schedule, { ...options, capture: true });
+    document.addEventListener('fullscreenchange', schedule, options);
+    window.navigation?.addEventListener('navigatesuccess', schedule, options);
+    schedule();
+    return { seeked: () => { if (step === 4 && overlay.isConnected && !overlay.hidden) move(1); } };
+  }
+
+  const touchGuide = installTouchGuide();
 
   window.addEventListener('touchstart', (event) => {
     if (seeking || seekTouchId !== null) {

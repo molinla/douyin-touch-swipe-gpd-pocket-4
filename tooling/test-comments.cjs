@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
-const { browserProfile, userscript } = require('./paths.cjs');
+const { browserProfile, loadTestScript } = require('./paths.cjs');
 
 const active = '[data-e2e="feed-active-video"]';
 const width = Number(process.env.DOUYIN_WIDTH || 1280);
@@ -10,7 +10,7 @@ const width = Number(process.env.DOUYIN_WIDTH || 1280);
     channel: 'chrome', headless: false, hasTouch: true, viewport: { width, height: 800 },
   });
   try {
-    await context.addInitScript({ path: userscript });
+    await context.addInitScript({ content: loadTestScript() });
     const page = context.pages()[0];
     await page.goto('https://www.douyin.com/jingxuan', { waitUntil: 'domcontentloaded', timeout: 30000 });
     const nav = page.locator('a[href*="recommend=1"]').filter({ hasText: '推荐' }).first();

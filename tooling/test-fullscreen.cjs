@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { chromium } = require('playwright');
-const { artifacts, browserProfile, userscript } = require('./paths.cjs');
+const { artifacts, browserProfile, loadTestScript } = require('./paths.cjs');
 
 const active = '[data-e2e="feed-active-video"]';
 const marker = 'data-douyin-touch-controls-idle';
@@ -11,7 +11,7 @@ const marker = 'data-douyin-touch-controls-idle';
     channel: 'chrome', headless: false, hasTouch: !process.env.DOUYIN_MOUSE_SEEK, viewport: null,
   });
   try {
-    await context.addInitScript({ path: userscript });
+    await context.addInitScript({ content: loadTestScript() });
     const page = context.pages()[0];
     page.on('pageerror', error => console.log('page-error',error.message));
     await page.goto('https://www.douyin.com/jingxuan', { waitUntil: 'domcontentloaded', timeout: 30000 });
