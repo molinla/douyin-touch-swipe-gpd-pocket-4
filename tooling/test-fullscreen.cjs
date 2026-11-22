@@ -192,6 +192,23 @@ const marker = 'data-douyin-touch-controls-idle';
     }
     const waitForIdleControls = () => page.waitForFunction(([selector, attribute]) =>
       document.querySelector(`${selector} .xgplayer`)?.hasAttribute(attribute), [active, marker], { timeout: 4800 });
+    const readLayout = () => player.evaluate(el => {
+      const video = el.querySelector('video');
+      const bounds = node => {
+        const { x, y, width, height } = node.getBoundingClientRect();
+        return [x, y, width, height].map(Math.round);
+      };
+      const style = getComputedStyle(video);
+      return { player: bounds(el), video: bounds(video), progress: bounds(el.querySelector('xg-progress')),
+        fit: style.objectFit, alignment: style.objectPosition };
+    });
+    async function checkIdleLayout(shown) {
+      const hidden = await readLayout();
+      assert.deepEqual(hidden.video, hidden.player, '隐藏底栏后视频使用完整播放器区域');
+      assert.equal(hidden.fit, 'contain');
+      assert.equal(hidden.alignment, '50% 50%');
+      assert.deepEqual(hidden.progress, shown.progress, '隐藏底栏时进度条命中区域保持原位');
+    }
 
     for (const mode of (process.env.DOUYIN_FULL_MODE || 'web,native').split(',')) {
       const selector = mode === 'native' ? '.xgplayer-fullscreen' : '[data-e2e="xgplayer-page-full-screen"]';
@@ -216,7 +233,9 @@ const marker = 'data-douyin-touch-controls-idle';
         return;
       }
       assert.equal(await player.getAttribute(marker),null);
+      const beforeIdle = await readLayout();
       await waitForIdleControls();
+      await checkIdleLayout(beforeIdle);
       assert.equal(await progress.evaluate(el => getComputedStyle(el).visibility), 'hidden');
       for (const selector of ['.player-position-box-bottom', '.positionBox.immersive-player-switch-on-hide-interaction-area']) {
         const overlay = page.locator(`${active} ${selector}`).first();
@@ -224,7 +243,9 @@ const marker = 'data-douyin-touch-controls-idle';
       }
       console.log(mode, '未开启清屏时，空闲后隐藏进度条、底部视频信息和右侧按钮');
       await setClear(true);
+      const clearBeforeIdle = await readLayout();
       await waitForIdleControls();
+      await checkIdleLayout(clearBeforeIdle);
       if (process.env.DOUYIN_INSPECT_HIDDEN) {
         const readHidden = () => player.evaluate((el, attribute) => {
           const nodes = [...el.querySelectorAll('xg-controls, xg-inner-controls, xg-outer-controls, xg-progress, .xgplayer-fullscreen')];
@@ -254,7 +275,8 @@ const marker = 'data-douyin-touch-controls-idle';
       await page.mouse.move(x,y);
       await page.waitForFunction(([selector,attribute]) => !document.querySelector(`${selector} .xgplayer`)?.hasAttribute(attribute),[active,marker],{timeout:3000});
       assert.equal(await player.locator('xg-controls').first().evaluate(el=>getComputedStyle(el).visibility),'visible');
-      console.log(mode, '全屏清屏空闲 3 秒隐藏底部控制区，移动鼠标立即恢复');
+      assert.deepEqual((await readLayout()).video, clearBeforeIdle.video);
+      console.log(mode, '全屏空闲时画面等比居中，唤醒底栏后恢复原布局');
       if (mode === 'native') {
         await page.waitForFunction(([selector,attribute]) => document.querySelector(`${selector} .xgplayer`)?.hasAttribute(attribute),[active,marker],{timeout:4800});
         await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]});

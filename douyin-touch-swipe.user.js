@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音触屏优化GPD Pocket 4专版
 // @namespace    local.douyin-touch-swipe
-// @version      1.4.4
+// @version      1.4.5
 // @homepageURL  https://github.com/molinla/douyin-touch-swipe-gpd-pocket-4
 // @supportURL   https://github.com/molinla/douyin-touch-swipe-gpd-pocket-4/issues
 // @description  为 GPD Pocket 4 优化抖音网页版推荐页。触屏切换视频和直播、开关评论、长按倍速、拖动进度、进入时自动解除静音，全屏空闲时自动隐藏控件。
@@ -137,7 +137,8 @@
     button.append(icon);
 
     const style = document.createElement('style');
-    const idleControls = `#slidelist [${HIDE_CONTROLS}] :is(${PLAYER_CONTROLS}),
+    const idlePlayer = `#slidelist .xgplayer[${HIDE_CONTROLS}]`;
+    const idleControls = `${idlePlayer} :is(${PLAYER_CONTROLS}),
       #slidelist .basePlayerContainer:has([${HIDE_CONTROLS}]) :is(${FEED_OVERLAYS})`;
     style.textContent = `
       [data-douyin-touch-nav="collapsed"] {
@@ -162,6 +163,15 @@
       :is(${idleControls}) * {
         visibility: hidden !important;
         pointer-events: none !important;
+      }
+      /* 全屏隐藏底栏后，释放播放器为控制区预留的底部空间。 */
+      ${idlePlayer} :is(xg-video-container, .xg-video-container) {
+        bottom: 0 !important;
+        height: 100% !important;
+      }
+      ${idlePlayer} video {
+        object-fit: contain !important;
+        object-position: center !important;
       }
       #slidelist [${SCRUBBING}] :is(xg-progress, .xgplayer-progress) { opacity: 0 !important; }
       .douyin-touch-scrub-preview {
