@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         抖音触屏优化GPD Pocket 4专版
 // @namespace    local.douyin-touch-swipe
-// @version      1.4.3
+// @version      1.4.4
 // @homepageURL  https://github.com/molinla/douyin-touch-swipe-gpd-pocket-4
 // @supportURL   https://github.com/molinla/douyin-touch-swipe-gpd-pocket-4/issues
-// @description  为 GPD Pocket 4 优化抖音网页版推荐页。触屏切换视频和直播、开关评论、长按倍速、拖动进度，全屏空闲时自动隐藏控件。
+// @description  为 GPD Pocket 4 优化抖音网页版推荐页。触屏切换视频和直播、开关评论、长按倍速、拖动进度、进入时自动解除静音，全屏空闲时自动隐藏控件。
 // @match        https://www.douyin.com/*
 // @run-at       document-start
 // @grant        none
@@ -58,6 +58,74 @@
   function isRecommendPage() {
     return location.pathname === '/' && new URLSearchParams(location.search).get('recommend') === '1';
   }
+
+  function installInitialAudio() {
+    const selector = `#slidelist ${ACTIVE_VIDEO} .xgplayer video`;
+    const controller = new AbortController();
+    const options = { capture: true, passive: true, signal: controller.signal };
+    let pending = false;
+    let needsInteraction = false;
+    let retryOnInteraction = false;
+
+    function currentVideo() {
+      return isRecommendPage() && !document.hidden ? document.querySelector(selector) : null;
+    }
+
+    async function enableAudio(video, fromInteraction = false) {
+      if (controller.signal.aborted || !video || video.paused || video.volume === 0
+        || (needsInteraction && !fromInteraction)) return;
+      const player = window.player;
+      if (player?.video === video && player.musicMute) return;
+      if (pending) {
+        if (fromInteraction) retryOnInteraction = true;
+        return;
+      }
+      if (!video.muted) {
+        controller.abort();
+        return;
+      }
+
+      pending = true;
+      video.muted = false;
+      try {
+        await video.play();
+        if (currentVideo() === video && !video.muted) controller.abort();
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        needsInteraction = error.name === 'NotAllowedError';
+        video.muted = true;
+        if (currentVideo() === video && video.paused) void video.play().catch(() => {});
+      } finally {
+        pending = false;
+        if (retryOnInteraction) {
+          retryOnInteraction = false;
+          void enableAudio(currentVideo(), true);
+        }
+      }
+    }
+
+    window.addEventListener('timeupdate', (event) => {
+      if (event.target instanceof HTMLVideoElement && event.target.matches(selector)
+        && isRecommendPage() && !document.hidden) void enableAudio(event.target);
+    }, options);
+    function onInteraction(event) {
+      if (!event.isTrusted) return;
+      const video = currentVideo();
+      if (!video) return;
+      if (event.target instanceof Element && event.target.closest('xg-volume, .xgplayer-volume')) {
+        if (event.type === 'click' || (event.type === 'keydown' && ['Enter', ' '].includes(event.key))) {
+          controller.abort();
+        }
+        return;
+      }
+      if (!navigator.userActivation || navigator.userActivation.isActive) void enableAudio(video, true);
+    }
+    for (const name of ['pointerup', 'touchend', 'keydown', 'click']) {
+      window.addEventListener(name, onInteraction, options);
+    }
+  }
+
+  installInitialAudio();
 
   function installSidebarToggle() {
     const button = document.createElement('button');

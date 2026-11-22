@@ -8,6 +8,7 @@
 
 | 命令 | 检查内容 |
 | --- | --- |
+| `npm run test:audio` | 在 Chrome 测试页面验证自动开声、浏览器拦截后的恢复和手动静音 |
 | `npm run test:touch` | 上下切换、松手动画、短划、双指、长按倍速和鼠标行为 |
 | `npm run test:live` | 直播卡片上下切换和长按行为 |
 | `npm run test:comments` | 左滑打开、右滑关闭和评论列表滚动 |
