@@ -344,6 +344,40 @@ const script = process.env.DOUYIN_TEST_SCRIPT || (process.env.DOUYIN_DIAGNOSTICS
     await touch('touchEnd', []);
     console.log('两侧长按到 2 倍速，松手或取消恢复 1.25 倍，中央长按不触发');
 
+    const speedButtons = ['feed-comment-icon', 'video-player-collect', 'video-avatar'];
+    const buttonSelector = speedButtons.map(name => `[data-e2e="${name}"]`).join(', ');
+    await page.evaluate(selector => {
+      window.speedButtonClicks = [];
+      window.recordSpeedButtonClick = event => {
+        const button = event.target.closest(selector);
+        if (!button) return;
+        window.speedButtonClicks.push(button.dataset.e2e);
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      };
+      window.addEventListener('click', window.recordSpeedButtonClick, true);
+    }, buttonSelector);
+    try {
+      for (const [index, name] of speedButtons.entries()) {
+        const button = page.locator(`${active} [data-e2e="${name}"]`).first();
+        const r = await button.boundingBox();
+        assert.ok(r, name);
+        const point = { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), id: 1 };
+        await touch('touchStart', [point]);
+        await page.waitForFunction(selector => document.querySelector(selector)?.playbackRate === 2,
+          `${active} video`, { timeout: 2000 });
+        await touch('touchEnd', []);
+        assert.equal(await getRate(), 1.25);
+        assert.deepEqual(await page.evaluate(() => window.speedButtonClicks), speedButtons.slice(0, index));
+        await page.touchscreen.tap(point.x, point.y);
+        assert.deepEqual(await page.evaluate(() => window.speedButtonClicks), speedButtons.slice(0, index + 1));
+        await expectActive(first);
+      }
+    } finally {
+      await page.evaluate(() => window.removeEventListener('click', window.recordSpeedButtonClick, true));
+    }
+    console.log('评论、收藏和头像长按进入 2 倍速，短按仍产生点击');
+
     await page.evaluate(() => {
       for (const arrow of document.querySelectorAll('[data-e2e^="video-switch-"]')) {
         arrow.style.visibility = 'hidden';

@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         抖音触屏优化GPD Pocket 4专版
 // @namespace    local.douyin-touch-swipe
-// @version      1.4.2
+// @version      1.4.3
 // @homepageURL  https://github.com/molinla/douyin-touch-swipe-gpd-pocket-4
 // @supportURL   https://github.com/molinla/douyin-touch-swipe-gpd-pocket-4/issues
-// @description  为 GPD Pocket 4 优化抖音网页版推荐页。触屏切换视频和直播、开关评论、长按倍速、拖动进度，全屏清屏时自动隐藏底栏。
+// @description  为 GPD Pocket 4 优化抖音网页版推荐页。触屏切换视频和直播、开关评论、长按倍速、拖动进度，全屏空闲时自动隐藏控件。
 // @match        https://www.douyin.com/*
 // @run-at       document-start
 // @grant        none
@@ -19,6 +19,7 @@
   const ACTIVE_VIDEO = '[data-e2e="feed-active-video"]';
   const LIVE = '[data-e2e="feed-live"]';
   const COMMENT_BUTTON = '[data-e2e="feed-comment-icon"]';
+  const SPEED_BUTTONS = `${COMMENT_BUTTON}, [data-e2e="video-player-collect"], [data-e2e="video-avatar"]`;
   const COMMENT_PANEL = '#relatedVideoCard';
   const COMMENT_LIST = '[data-e2e="comment-list"], .comment-mainContent';
   const COMMENT_AREA = '[data-e2e^="comment-"], .comment-mainContent';
@@ -35,6 +36,9 @@
   const CONTROLS_IDLE_MS = 3000;
   const HIDE_CONTROLS = 'data-douyin-touch-controls-idle';
   const PROGRESS = 'xg-progress, .xgplayer-progress';
+  const PLAYER_CONTROLS = `xg-controls, .xgplayer-controls, xg-inner-controls, xg-outer-controls,
+    ${PROGRESS}, .xg-mini-progress, .xgplayer-mini-progress`;
+  const FEED_OVERLAYS = '.player-position-box-bottom, .positionBox.immersive-player-switch-on-hide-interaction-area';
   const SEEK_TOUCH_SCALE = 1.8;
   const SEEK_DRAG_START = 4;
   const SEEK_CANCEL_DISTANCE = 48;
@@ -65,6 +69,8 @@
     button.append(icon);
 
     const style = document.createElement('style');
+    const idleControls = `#slidelist [${HIDE_CONTROLS}] :is(${PLAYER_CONTROLS}),
+      #slidelist .basePlayerContainer:has([${HIDE_CONTROLS}]) :is(${FEED_OVERLAYS})`;
     style.textContent = `
       [data-douyin-touch-nav="collapsed"] {
         --navigation-width: 52px;
@@ -79,16 +85,13 @@
       }
       #slidelist:is(:fullscreen, .isCssFullScreen, .isFullScreen) { touch-action: pinch-zoom; }
       #slidelist :is([data-e2e="comment-list"], .comment-mainContent) { touch-action: pan-y pinch-zoom; }
-      #slidelist [${HIDE_CONTROLS}] :is(xg-controls, .xgplayer-controls, xg-inner-controls, xg-outer-controls,
-                                       xg-progress, .xgplayer-progress, .xg-mini-progress, .xgplayer-mini-progress),
-      #slidelist .basePlayerContainer:has([${HIDE_CONTROLS}]) .player-position-box-bottom {
+      :is(${idleControls}) {
         opacity: 0 !important;
         visibility: hidden !important;
         pointer-events: none !important;
         transition: none !important;
       }
-      #slidelist [${HIDE_CONTROLS}] :is(xg-controls, .xgplayer-controls, xg-inner-controls, xg-outer-controls) *,
-      #slidelist .basePlayerContainer:has([${HIDE_CONTROLS}]) .player-position-box-bottom * {
+      :is(${idleControls}) * {
         visibility: hidden !important;
         pointer-events: none !important;
       }
@@ -215,12 +218,12 @@
         expanded = false;
         return;
       }
+      if (document.head && !style.isConnected) document.head.append(style);
       if (button.isConnected && sidebar?.isConnected) return;
 
       const navigation = document.getElementById('douyin-navigation');
       const nextLayout = navigation?.parentElement;
-      if (!nextLayout?.querySelector(':scope > #douyin-right-container') || !document.head) return;
-      if (!style.isConnected) document.head.append(style);
+      if (!nextLayout?.querySelector(':scope > #douyin-right-container')) return;
       if (layout !== nextLayout) layout?.removeAttribute('data-douyin-touch-nav');
       layout = nextLayout;
       sidebar = navigation;
@@ -273,8 +276,7 @@
 
     function sync() {
       const root = document.getElementById('slidelist');
-      const active = isRecommendPage() && isFeedFullscreen(root) ? root.querySelector(`${ACTIVE_VIDEO} .xgplayer`) : null;
-      const next = active?.closest('.immersive-player-switch-on') ? active : null;
+      const next = isRecommendPage() && isFeedFullscreen(root) ? root.querySelector(`${ACTIVE_VIDEO} .xgplayer`) : null;
       if (player === next) return;
       clearTimeout(timer);
       timer = 0;
@@ -473,14 +475,32 @@
     action.run();
   }
 
-  function getSpeedVideo(card, x, y) {
+  function getSpeedVideo(card, x, y, fromSpeedButton) {
     if (card.querySelector(LIVE)) return null;
     const video = card.querySelector(`${ACTIVE_VIDEO} .xgplayer video`);
-    if (!video) return null;
+    if (!video || fromSpeedButton) return video;
     const rect = video.getBoundingClientRect();
     if (!rect.width || x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) return null;
     const fraction = (x - rect.left) / rect.width;
     return fraction <= EDGE_FRACTION || fraction >= 1 - EDGE_FRACTION ? video : null;
+  }
+
+  function engageSpeed(video) {
+    const previousRate = video.playbackRate;
+    if (previousRate === 2) return () => {};
+
+    const player = window.player;
+    const keyboard = player?.video === video ? player.getPlugin?.('keyboard') || player.plugins?.keyboard : null;
+    if (keyboard?.config?.playbackRate === 2 && typeof keyboard.changePlaybackRate === 'function'
+      && typeof keyboard.handleKeyUp === 'function') {
+      // 复用方向键的长按阶段，跳过会改变进度的短按阶段。
+      keyboard.changePlaybackRate();
+      if (video.playbackRate === 2) return () => keyboard.handleKeyUp();
+      keyboard.handleKeyUp();
+    }
+
+    video.playbackRate = 2;
+    return () => { video.playbackRate = previousRate; };
   }
 
   function startSpeed(swipe) {
@@ -488,8 +508,7 @@
     if (gesture !== swipe || !isRecommendPage() || !video.isConnected
       || !video.closest(ACTIVE_VIDEO) || swipe.track.style.transform !== swipe.nativeTransform) return;
 
-    swipe.previousRate = video.playbackRate;
-    video.playbackRate = 2;
+    swipe.releaseSpeed = engageSpeed(video);
     const indicator = document.createElement('div');
     indicator.textContent = '2×';
     indicator.setAttribute('aria-hidden', 'true');
@@ -504,10 +523,14 @@
 
   function stopSpeed(swipe) {
     clearTimeout(swipe.speedTimer);
-    if (swipe.previousRate === undefined) return false;
-    swipe.speedVideo.playbackRate = swipe.previousRate;
-    swipe.previousRate = undefined;
-    swipe.speedIndicator.remove();
+    if (!swipe.releaseSpeed) return false;
+    const release = swipe.releaseSpeed;
+    swipe.releaseSpeed = null;
+    try {
+      release();
+    } finally {
+      swipe.speedIndicator.remove();
+    }
     return true;
   }
 
@@ -593,7 +616,7 @@
   function beginScrub(event) {
     if (seeking || !event.isPrimary || (event.pointerType !== 'touch' && event.pointerType !== 'pen')
       || !isRecommendPage() || !(event.target instanceof Element)) return;
-    if (event.target.closest(COMMENT_PANEL)) return;
+    if (event.target.closest(`${COMMENT_PANEL}, ${SPEED_BUTTONS}`)) return;
     const card = event.target.closest(ACTIVE_VIDEO);
     const player = card?.querySelector('.xgplayer');
     if (!player) return;
@@ -683,12 +706,13 @@
     const target = event.target;
     if (!(target instanceof Element)) return;
     const fromPanel = Boolean(target.closest(COMMENT_PANEL));
+    const fromSpeedButton = !fromPanel && Boolean(target.closest(SPEED_BUTTONS));
     const inCommentList = fromPanel && target.closest(COMMENT_LIST);
-    if (target.closest(inCommentList ? EDITABLE : CONTROLS)) return;
+    if (target.closest(inCommentList || fromSpeedButton ? EDITABLE : CONTROLS)) return;
     if (!fromPanel && target.closest(COMMENT_AREA)) return;
     const root = target.closest('#slidelist');
     const fullscreen = isFeedFullscreen(root);
-    const card = target.closest(SLIDE) || (fullscreen && root.querySelector(ACTIVE_VIDEO)?.closest(SLIDE));
+    const card = target.closest(SLIDE) || (fullscreen ? root.querySelector(ACTIVE_VIDEO)?.closest(SLIDE) : null);
     const list = card?.closest(LIST);
     const track = card?.parentElement;
     if (!list || list === track || (!fullscreen && list.getAttribute('data-active') === 'false')) return;
@@ -706,17 +730,18 @@
       nativeTransform: track.style.transform, id: touch.identifier, x: touch.clientX, y: touch.clientY,
       nativeY: transformY(getComputedStyle(track).transform),
       started: performance.now(), offset: 0, axis: null, multitouch: event.touches.length > 1,
-      fromPanel, activeVideo, hasCommentButton: Boolean(activeVideo?.querySelector(COMMENT_BUTTON)),
+      fromPanel, fromSpeedButton, activeVideo, hasCommentButton: Boolean(activeVideo?.querySelector(COMMENT_BUTTON)),
     };
     gesture = swipe;
     if (swipe.multitouch || fromPanel) return;
-    event.stopPropagation();
-    swipe.speedVideo = getSpeedVideo(card, swipe.x, swipe.y);
+    if (!fromSpeedButton) event.stopPropagation();
+    swipe.speedVideo = getSpeedVideo(card, swipe.x, swipe.y, fromSpeedButton);
     if (swipe.speedVideo) swipe.speedTimer = setTimeout(() => startSpeed(swipe), HOLD_MS);
   }, { capture: true, passive: false });
 
   window.addEventListener('pointermove', (event) => {
-    if (event.pointerType === 'touch' && gesture && !gesture.fromPanel && !gesture.multitouch) event.stopPropagation();
+    if (event.pointerType === 'touch' && gesture && !gesture.fromPanel && !gesture.fromSpeedButton
+      && !gesture.multitouch) event.stopPropagation();
   }, { capture: true, passive: true });
 
   window.addEventListener('touchmove', (event) => {
@@ -727,7 +752,7 @@
       event.stopPropagation();
       return;
     }
-    if (swipe.previousRate !== undefined) {
+    if (swipe.releaseSpeed) {
       consume(event);
       return;
     }
@@ -740,6 +765,7 @@
     const dx = touch.clientX - swipe.x;
     const dy = touch.clientY - swipe.y;
     if (Math.hypot(dx, dy) >= DRAG_START) clearTimeout(swipe.speedTimer);
+    if (swipe.fromSpeedButton) return;
     const axis = swipe.axis || getDragAxis(dx, dy);
     if (swipe.fromPanel && (!axis || axis === 'vertical')) {
       swipe.axis = axis;
@@ -774,6 +800,7 @@
       consume(event);
       return;
     }
+    if (swipe.fromSpeedButton) return;
 
     const touch = [...event.changedTouches].find((point) => point.identifier === swipe.id);
     if (!touch || event.touches.length) {
@@ -807,7 +834,7 @@
   }, { capture: true, passive: false });
 
   window.addEventListener('contextmenu', (event) => {
-    if (gesture?.previousRate !== undefined && gesture.card.contains(event.target)) consume(event);
+    if (gesture?.releaseSpeed && gesture.card.contains(event.target)) consume(event);
   }, { capture: true });
   window.addEventListener('touchcancel', (event) => {
     if (isSeekTouch(event, true)) cancelScrub();

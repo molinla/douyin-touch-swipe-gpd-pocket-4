@@ -190,6 +190,9 @@ const marker = 'data-douyin-touch-controls-idle';
       console.log('原生鼠标拖动可以正常定位进度');
       return;
     }
+    const waitForIdleControls = () => page.waitForFunction(([selector, attribute]) =>
+      document.querySelector(`${selector} .xgplayer`)?.hasAttribute(attribute), [active, marker], { timeout: 4800 });
+
     for (const mode of (process.env.DOUYIN_FULL_MODE || 'web,native').split(',')) {
       const selector = mode === 'native' ? '.xgplayer-fullscreen' : '[data-e2e="xgplayer-page-full-screen"]';
       await setClear(false);
@@ -213,8 +216,15 @@ const marker = 'data-douyin-touch-controls-idle';
         return;
       }
       assert.equal(await player.getAttribute(marker),null);
+      await waitForIdleControls();
+      assert.equal(await progress.evaluate(el => getComputedStyle(el).visibility), 'hidden');
+      for (const selector of ['.player-position-box-bottom', '.positionBox.immersive-player-switch-on-hide-interaction-area']) {
+        const overlay = page.locator(`${active} ${selector}`).first();
+        if (await overlay.count()) assert.equal(await overlay.evaluate(el => getComputedStyle(el).visibility), 'hidden', selector);
+      }
+      console.log(mode, '未开启清屏时，空闲后隐藏进度条、底部视频信息和右侧按钮');
       await setClear(true);
-      await page.waitForFunction(([selector,attribute]) => document.querySelector(`${selector} .xgplayer`)?.hasAttribute(attribute),[active,marker],{timeout:4800});
+      await waitForIdleControls();
       if (process.env.DOUYIN_INSPECT_HIDDEN) {
         const readHidden = () => player.evaluate((el, attribute) => {
           const nodes = [...el.querySelectorAll('xg-controls, xg-inner-controls, xg-outer-controls, xg-progress, .xgplayer-fullscreen')];
@@ -255,8 +265,6 @@ const marker = 'data-douyin-touch-controls-idle';
         console.log('触摸重新显示底部控制区，手指按住时不会自动隐藏');
       }
       await setClear(false);
-      await page.waitForTimeout(3200);
-      assert.equal(await player.getAttribute(marker),null);
 
       await closeComments();
       if (process.env.DOUYIN_FULL_FALLBACK) {
